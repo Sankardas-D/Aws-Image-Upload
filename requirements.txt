@@ -4,9 +4,3 @@ boto3
 python-multipart
 jinja2
 python-dotenv
-fastapi
-uvicorn
-boto3
-python-multipart
-jinja2
-python-dotenv
