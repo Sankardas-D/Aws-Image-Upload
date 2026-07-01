@@ -1,0 +1,646 @@
+<!DOCTYPE html>
+<html lang="en">
+
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <meta name="description" content="FastAPI image upload demo for AWS S3 using an EC2 instance role.">
+    <title>AWS Image Upload Demo</title>
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&display=swap" rel="stylesheet">
+    <style>
+        /* Base page styling */
+        :root {
+            --bg-1: #eff6ff;
+            --bg-2: #f8fafc;
+            --card: rgba(255, 255, 255, 0.92);
+            --card-border: rgba(148, 163, 184, 0.25);
+            --text: #0f172a;
+            --muted: #475569;
+            --accent: #2563eb;
+            --accent-dark: #1d4ed8;
+            --success-bg: #ecfdf5;
+            --success-text: #047857;
+            --error-bg: #fef2f2;
+            --error-text: #b91c1c;
+            --shadow: 0 25px 70px rgba(15, 23, 42, 0.14);
+        }
+
+        * {
+            box-sizing: border-box;
+        }
+
+        html {
+            scroll-behavior: smooth;
+        }
+
+        body {
+            margin: 0;
+            min-height: 100vh;
+            font-family: 'Inter', system-ui, -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
+            color: var(--text);
+            background:
+                radial-gradient(circle at top left, rgba(37, 99, 235, 0.18), transparent 30%),
+                radial-gradient(circle at bottom right, rgba(14, 165, 233, 0.12), transparent 28%),
+                linear-gradient(180deg, var(--bg-1), var(--bg-2));
+        }
+
+        /* Layout wrapper */
+        .page {
+            min-height: 100vh;
+            display: grid;
+            place-items: center;
+            padding: 32px 16px;
+        }
+
+        .shell {
+            width: min(920px, 100%);
+            display: grid;
+            gap: 24px;
+            align-items: start;
+        }
+
+        /* Header copy */
+        .hero {
+            text-align: center;
+            padding: 8px 16px 0;
+        }
+
+        .hero h1 {
+            margin: 0;
+            font-size: clamp(2.3rem, 5vw, 4.5rem);
+            line-height: 1.02;
+            letter-spacing: -0.04em;
+        }
+
+        .hero p {
+            margin: 14px auto 0;
+            max-width: 700px;
+            font-size: clamp(1rem, 2vw, 1.1rem);
+            line-height: 1.7;
+            color: var(--muted);
+        }
+
+        /* Main card */
+        .card {
+            width: 100%;
+            background: var(--card);
+            backdrop-filter: blur(10px);
+            border: 1px solid var(--card-border);
+            border-radius: 28px;
+            box-shadow: var(--shadow);
+            overflow: hidden;
+            animation: fadeUp 500ms ease-out both;
+        }
+
+        .card-inner {
+            padding: 28px;
+        }
+
+        .card-top {
+            display: grid;
+            gap: 12px;
+            margin-bottom: 24px;
+        }
+
+        .eyebrow {
+            display: inline-flex;
+            align-self: start;
+            padding: 8px 14px;
+            border-radius: 999px;
+            background: rgba(37, 99, 235, 0.08);
+            color: var(--accent-dark);
+            font-size: 0.9rem;
+            font-weight: 700;
+        }
+
+        .card-top h2 {
+            margin: 0;
+            font-size: clamp(1.35rem, 2.6vw, 2rem);
+            letter-spacing: -0.02em;
+        }
+
+        .card-top p {
+            margin: 0;
+            color: var(--muted);
+            line-height: 1.7;
+        }
+
+        /* Drop area */
+        .drop-zone {
+            position: relative;
+            display: grid;
+            gap: 14px;
+            place-items: center;
+            text-align: center;
+            padding: 28px;
+            border: 1.5px dashed rgba(37, 99, 235, 0.28);
+            border-radius: 22px;
+            background: linear-gradient(180deg, rgba(255, 255, 255, 0.85), rgba(239, 246, 255, 0.6));
+            transition: transform 180ms ease, border-color 180ms ease, background 180ms ease, box-shadow 180ms ease;
+        }
+
+        .drop-zone.dragover {
+            transform: translateY(-2px);
+            border-color: rgba(37, 99, 235, 0.7);
+            background: linear-gradient(180deg, rgba(255, 255, 255, 0.98), rgba(219, 234, 254, 0.72));
+            box-shadow: 0 18px 40px rgba(37, 99, 235, 0.08);
+        }
+
+        .drop-icon {
+            width: 64px;
+            height: 64px;
+            display: grid;
+            place-items: center;
+            border-radius: 18px;
+            background: rgba(37, 99, 235, 0.09);
+            color: var(--accent);
+            font-size: 1.8rem;
+            font-weight: 800;
+        }
+
+        .drop-zone strong {
+            font-size: 1.05rem;
+        }
+
+        .drop-zone span {
+            color: var(--muted);
+            line-height: 1.6;
+        }
+
+        /* Hidden file input */
+        #fileInput {
+            position: absolute;
+            inset: 0;
+            opacity: 0;
+            cursor: pointer;
+        }
+
+        /* Controls */
+        .selected-row,
+        .button-row,
+        .meta-row {
+            display: flex;
+            gap: 12px;
+            flex-wrap: wrap;
+            align-items: center;
+        }
+
+        .selected-row {
+            margin-top: 18px;
+            justify-content: space-between;
+            padding: 14px 16px;
+            border-radius: 16px;
+            background: rgba(15, 23, 42, 0.03);
+        }
+
+        .selected-label {
+            font-size: 0.92rem;
+            color: var(--muted);
+        }
+
+        #selectedFileName {
+            font-weight: 700;
+            color: var(--text);
+            word-break: break-word;
+        }
+
+        .button-row {
+            margin-top: 18px;
+        }
+
+        .button-row button,
+        .secondary-button {
+            appearance: none;
+            border: 0;
+            border-radius: 999px;
+            padding: 14px 18px;
+            font: inherit;
+            font-weight: 700;
+            cursor: pointer;
+            transition: transform 160ms ease, box-shadow 160ms ease, background 160ms ease, opacity 160ms ease;
+        }
+
+        .button-row button:hover,
+        .secondary-button:hover {
+            transform: translateY(-1px);
+        }
+
+        .primary-button {
+            background: linear-gradient(135deg, var(--accent), #1d4ed8);
+            color: white;
+            box-shadow: 0 12px 28px rgba(37, 99, 235, 0.26);
+        }
+
+        .primary-button:hover {
+            background: linear-gradient(135deg, var(--accent-dark), #1e40af);
+        }
+
+        .secondary-button {
+            background: rgba(15, 23, 42, 0.06);
+            color: var(--text);
+        }
+
+        .button-row button:disabled {
+            cursor: not-allowed;
+            opacity: 0.5;
+            transform: none;
+            box-shadow: none;
+        }
+
+        /* Status blocks */
+        .status {
+            margin-top: 18px;
+            display: none;
+            align-items: center;
+            gap: 10px;
+            padding: 14px 16px;
+            border-radius: 16px;
+            font-weight: 600;
+            line-height: 1.5;
+        }
+
+        .status.success {
+            display: flex;
+            background: var(--success-bg);
+            color: var(--success-text);
+        }
+
+        .status.error {
+            display: flex;
+            background: var(--error-bg);
+            color: var(--error-text);
+        }
+
+        .status.loading {
+            display: flex;
+            background: rgba(37, 99, 235, 0.06);
+            color: var(--accent-dark);
+        }
+
+        .spinner {
+            width: 18px;
+            height: 18px;
+            border-radius: 50%;
+            border: 2px solid rgba(29, 78, 216, 0.2);
+            border-top-color: currentColor;
+            animation: spin 700ms linear infinite;
+            flex: 0 0 auto;
+        }
+
+        /* Success details */
+        .result {
+            margin-top: 20px;
+            display: none;
+            gap: 18px;
+            animation: fadeUp 400ms ease-out both;
+        }
+
+        .result.show {
+            display: grid;
+        }
+
+        .result-meta {
+            display: grid;
+            gap: 12px;
+            padding: 18px;
+            border-radius: 20px;
+            background: rgba(15, 23, 42, 0.03);
+        }
+
+        .result-meta .label {
+            font-size: 0.85rem;
+            text-transform: uppercase;
+            letter-spacing: 0.08em;
+            color: var(--muted);
+        }
+
+        .result-meta .value {
+            font-weight: 700;
+            word-break: break-word;
+        }
+
+        .preview-wrap {
+            border-radius: 22px;
+            overflow: hidden;
+            border: 1px solid rgba(148, 163, 184, 0.25);
+            background: #fff;
+            box-shadow: 0 18px 40px rgba(15, 23, 42, 0.08);
+        }
+
+        .preview-wrap img {
+            display: block;
+            width: 100%;
+            max-height: 520px;
+            object-fit: contain;
+            background: linear-gradient(180deg, #f8fafc, #ffffff);
+        }
+
+        /* Small helper text */
+        .helper {
+            font-size: 0.92rem;
+            color: var(--muted);
+            line-height: 1.6;
+        }
+
+        /* Animations */
+        @keyframes spin {
+            to {
+                transform: rotate(360deg);
+            }
+        }
+
+        @keyframes fadeUp {
+            from {
+                opacity: 0;
+                transform: translateY(10px);
+            }
+
+            to {
+                opacity: 1;
+                transform: translateY(0);
+            }
+        }
+
+        /* Responsive layout */
+        @media (min-width: 768px) {
+            .card-inner {
+                padding: 36px;
+            }
+
+            .result.show {
+                grid-template-columns: 1fr 1.2fr;
+                align-items: start;
+            }
+        }
+
+        @media (max-width: 540px) {
+            .page {
+                padding: 18px 12px;
+            }
+
+            .card-inner {
+                padding: 22px;
+            }
+
+            .drop-zone {
+                padding: 22px;
+            }
+
+            .button-row button,
+            .secondary-button {
+                width: 100%;
+            }
+
+            .selected-row {
+                flex-direction: column;
+                align-items: flex-start;
+            }
+        }
+    </style>
+</head>
+
+<body>
+    <div class="page">
+        <main class="shell">
+            <!-- Page header -->
+            <section class="hero" aria-labelledby="pageTitle">
+                <h1 id="pageTitle">AWS Image Upload Demo</h1>
+                <p>Upload an image to AWS S3 using FastAPI running on an EC2 instance.</p>
+            </section>
+
+            <!-- Upload card -->
+            <section class="card" aria-label="Image upload card">
+                <div class="card-inner">
+                    <div class="card-top">
+                        <h2>Upload an image to your private S3 bucket</h2>
+                        <p>
+                            Choose an image from your computer or drag and drop it into the upload area.
+                            The file is sent to the FastAPI backend, stored in private S3, and shown back to you using a pre-signed URL.
+                        </p>
+                    </div>
+
+                    <!-- Drag and drop / click area -->
+                    <div class="drop-zone" id="dropZone">
+                        <div class="drop-icon">⇪</div>
+                        <strong>Drag &amp; drop image here</strong>
+                        <span>or click anywhere in this area to browse your computer</span>
+
+                        <!-- Hidden file input drives both click and drag/drop flows -->
+                        <input type="file" id="fileInput" accept="image/*" aria-label="Choose image file">
+                    </div>
+
+                    <!-- Selected filename display -->
+                    <div class="selected-row" aria-live="polite">
+                        <div class="selected-label">Selected:</div>
+                        <div id="selectedFileName">No file selected</div>
+                    </div>
+
+                    <!-- Action buttons -->
+                    <div class="button-row">
+                        <button type="button" id="chooseButton" class="secondary-button">Choose Image</button>
+                        <button type="button" id="uploadButton" class="primary-button" disabled>Upload</button>
+                    </div>
+
+                    <!-- Status messages -->
+                    <div id="statusMessage" class="status" role="status" aria-live="polite"></div>
+
+                    <!-- Loading indicator -->
+                    <div id="loadingMessage" class="status loading" style="display:none;" aria-live="polite">
+                        <span class="spinner" aria-hidden="true"></span>
+                        <span>Uploading image...</span>
+                    </div>
+
+                    <!-- Upload result section -->
+                    <section id="resultSection" class="result" aria-live="polite">
+                        <div class="result-meta">
+                            <div>
+                                <div class="label">Success</div>
+                                <div class="value" id="successText">Upload successful</div>
+                            </div>
+                            <div>
+                                <div class="label">Filename</div>
+                                <div class="value" id="uploadedFilename"></div>
+                            </div>
+                            <div class="helper">
+                                The image below loads from the pre-signed URL returned by the server.
+                            </div>
+                            <button type="button" id="uploadAnotherButton" class="primary-button">Upload Another Image</button>
+                        </div>
+
+                        <div class="preview-wrap">
+                            <img id="previewImage" alt="Uploaded image preview">
+                        </div>
+                    </section>
+                </div>
+            </section>
+        </main>
+    </div>
+
+    <script>
+        // Grab the elements we need once so the code stays easy to read.
+        const fileInput = document.getElementById('fileInput');
+        const chooseButton = document.getElementById('chooseButton');
+        const uploadButton = document.getElementById('uploadButton');
+        const uploadAnotherButton = document.getElementById('uploadAnotherButton');
+        const selectedFileName = document.getElementById('selectedFileName');
+        const dropZone = document.getElementById('dropZone');
+        const statusMessage = document.getElementById('statusMessage');
+        const loadingMessage = document.getElementById('loadingMessage');
+        const resultSection = document.getElementById('resultSection');
+        const uploadedFilename = document.getElementById('uploadedFilename');
+        const previewImage = document.getElementById('previewImage');
+
+        // Open the native file picker when the button is clicked.
+        chooseButton.addEventListener('click', () => fileInput.click());
+
+        // Enable upload once a file is chosen.
+        fileInput.addEventListener('change', () => {
+            const file = fileInput.files[0];
+
+            if (file) {
+                selectedFileName.textContent = file.name;
+                uploadButton.disabled = false;
+                clearMessages();
+            } else {
+                selectedFileName.textContent = 'No file selected';
+                uploadButton.disabled = true;
+            }
+        });
+
+        // Submit the selected file to FastAPI.
+        uploadButton.addEventListener('click', uploadImage);
+
+        // Reset the UI so the student can upload another image.
+        uploadAnotherButton.addEventListener('click', () => {
+            fileInput.value = '';
+            selectedFileName.textContent = 'No file selected';
+            uploadButton.disabled = true;
+            resultSection.classList.remove('show');
+            previewImage.src = '';
+            clearMessages();
+        });
+
+        // Drag and drop support keeps the page simple while still feeling modern.
+        ['dragenter', 'dragover'].forEach((eventName) => {
+            dropZone.addEventListener(eventName, (event) => {
+                event.preventDefault();
+                event.stopPropagation();
+                dropZone.classList.add('dragover');
+            });
+        });
+
+        ['dragleave', 'drop'].forEach((eventName) => {
+            dropZone.addEventListener(eventName, (event) => {
+                event.preventDefault();
+                event.stopPropagation();
+                dropZone.classList.remove('dragover');
+            });
+        });
+
+        dropZone.addEventListener('drop', (event) => {
+            const droppedFile = event.dataTransfer.files[0];
+
+            if (!droppedFile) {
+                return;
+            }
+
+            // Keep only image files for this demo.
+            if (!droppedFile.type.startsWith('image/')) {
+                showError('Please drop an image file.');
+                return;
+            }
+
+            const dataTransfer = new DataTransfer();
+            dataTransfer.items.add(droppedFile);
+            fileInput.files = dataTransfer.files;
+            selectedFileName.textContent = droppedFile.name;
+            uploadButton.disabled = false;
+            clearMessages();
+        });
+
+        // Clicking the drop zone should also open the file picker.
+        dropZone.addEventListener('click', (event) => {
+            if (event.target !== fileInput) {
+                fileInput.click();
+            }
+        });
+
+        async function uploadImage() {
+            const file = fileInput.files[0];
+
+            if (!file) {
+                showError('Please choose an image first.');
+                return;
+            }
+
+            // Build multipart/form-data so FastAPI can read UploadFile.
+            const formData = new FormData();
+            formData.append('file', file);
+
+            setLoadingState(true);
+            clearMessages();
+
+            try {
+                // No hardcoded URL here; this works locally and on EC2.
+                const response = await fetch('/upload', {
+                    method: 'POST',
+                    body: formData
+                });
+
+                const data = await response.json().catch(() => ({}));
+
+                if (!response.ok || !data.success) {
+                    throw new Error(data.detail || 'Upload failed.');
+                }
+
+                showSuccess(data.filename, data.url);
+            } catch (error) {
+                showError(error.message || 'Upload failed.');
+            } finally {
+                setLoadingState(false);
+            }
+        }
+
+        function setLoadingState(isLoading) {
+            uploadButton.disabled = isLoading || !fileInput.files[0];
+            chooseButton.disabled = isLoading;
+            fileInput.disabled = isLoading;
+
+            if (isLoading) {
+                loadingMessage.style.display = 'flex';
+                statusMessage.style.display = 'none';
+            } else {
+                loadingMessage.style.display = 'none';
+                chooseButton.disabled = false;
+                fileInput.disabled = false;
+            }
+        }
+
+        function showSuccess(filename, url) {
+            statusMessage.className = 'status success';
+            statusMessage.innerHTML = '✅ Upload successful';
+            statusMessage.style.display = 'flex';
+
+            uploadedFilename.textContent = filename;
+            previewImage.src = url;
+            resultSection.classList.add('show');
+            resultSection.scrollIntoView({ behavior: 'smooth', block: 'start' });
+        }
+
+        function showError(message) {
+            statusMessage.className = 'status error';
+            statusMessage.textContent = message;
+            statusMessage.style.display = 'flex';
+        }
+
+        function clearMessages() {
+            statusMessage.className = 'status';
+            statusMessage.textContent = '';
+            statusMessage.style.display = 'none';
+        }
+    </script>
+</body>
+
+</html>
